@@ -1,0 +1,87 @@
+    {
+        "version": "0.2.0",
+        "configurations": [
+            {
+                "name": "findfiles_report",
+                "type": "debugpy",
+                "request": "launch",
+                "program": "${workspaceFolder}/findfiles.py",
+                "args": [
+                    "C:\\temp\\1file",
+                    "--include-files", "*.mxf,*.mov,*.mp4",
+                    "--report", "c:/._ffastrans_work_root/20251120-1855-1414-8b3a-f84d633bdf8f/20251122-1648-4938-27a4-8b16f4db840c/report.json",
+                    "--output-json", "c:/temp/found_files.json"
+                ],
+                "console": "integratedTerminal"
+            },
+            {
+                "name": "add_field_to_report",
+                "type": "debugpy",
+                "request": "launch",
+                "program": "${workspaceFolder}/add_field_to_report.py",
+                "args": [
+                    "--report_json",
+                    "c:/.ffastrans_work_root/20251120-1855-1414-8b3a-f84d633bdf8f/20251122-1648-4938-27a4-8b16f4db840c/report.json",
+                    "--match_value",
+                    "c:/.ffastrans_work_root/20251120-1855-1414-8b3a-f84d633bdf8f/20251122-1648-4938-27a4-8b16f4db840c/132-15-16~251122164855006~50512~20251019-1136-3898-2a4a-bf372f16d970~enc_av_dnxhd.mxf",
+                    "--value_to_add",
+                    "c:/.ffastrans_work_root/20251120-1855-1414-8b3a-f84d633bdf8f/20251122-1648-4938-27a4-8b16f4db840c/temp/0/DNX36/found_files.json",
+                    "--new_field_name",
+                    "avid_files"
+                ],
+                "console": "integratedTerminal"
+            },
+            {
+                "name": "gpu_encoding_cmd",
+                "type": "debugpy",
+                "request": "launch",
+                "program": "${workspaceFolder}/gpu_encoding_cmd.py",
+                "args": [
+                    "c:\\temp\\enc_cmd.txt",
+                    "--additional-options", "-preset p1 -rc vbr_hq -cq 28 -b:v 6M -g 50 -bf 3",
+                    "--bmx_cmd_file", "c:\\temp\\bmx_cmd.txt"
+                    ,"--test"
+                    
+                ],
+                "console": "integratedTerminal"
+            },
+            
+            {
+                "name": "simons_folderstructure_checker",
+                "type": "debugpy",
+                "request": "launch",
+                "program": "${workspaceFolder}/simons_folderstructure_checker.py",
+                "args": [
+                    "--input",
+                    "F:\\2025\\01_Dump\\Simon_Ffastrans_Dev\\2025\\02_Jobs\\2511_SER_Test\\01_Rushes\\2025_11_10\\FX9\\250306_TFL8_ANB_EO_FX6_001",
+                    "--recursed",
+                    "\\2025_11_10\\FX9",
+                    "--out_root",
+                    "\\\\SeriousNexis\\zFfastrans_Testing_Media\\07\\Stage_01_AAF"
+                ],
+                "console": "integratedTerminal"
+            },
+            {
+                "name": "move_files_with_report",
+                "type": "debugpy",
+                "request": "launch",
+                "program": "${workspaceFolder}/move_files_with_report.py",
+                "args": [
+                    "--input-dir", "C:/temp/input",
+                    "--output-dir", "C:/temp/output",
+                    "--json-out", "C:/temp/moved.json",
+                    "--include-files", "*.mxf"
+                ],
+                "console": "integratedTerminal"
+            },
+            {
+                "name": "Python: Test mongo_upsert.py",
+                "type": "debugpy",
+                "request": "launch",
+                "program": "${workspaceFolder}/test_mongo_upsert.py",
+                "console": "integratedTerminal",
+                "justMyCode": false
+            }
+      
+    ]
+}

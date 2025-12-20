@@ -1,0 +1,5 @@
+{
+    "security.allowedUNCHosts": [
+        "SeriousNexis","desktop-3vmpan6"
+    ]
+}
