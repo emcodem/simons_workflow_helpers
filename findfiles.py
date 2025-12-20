@@ -6,6 +6,64 @@ import fnmatch
 import argparse
 import logging
 
+# Resolve custom libs folder if using --target
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LIBS_DIR = os.path.join(BASE_DIR, "libs")
+if LIBS_DIR not in sys.path:
+    sys.path.insert(0, LIBS_DIR)
+
+from mongo_upsert import MongoUpsert
+
+import os
+import platform
+import subprocess
+import sys
+
+def set_permanent_python_no_bytecode():
+    os_type = platform.system()
+    var_name = "PYTHONDONTWRITEBYTECODE"
+    value = "1"
+
+    print(f"Detected OS: {os_type}")
+
+    try:
+        if os_type == "Windows":
+            # setx /M sets the variable at the System (Machine) level
+            # This writes to the Registry: HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment
+            cmd = f'setx {var_name} "{value}" /M'
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+            print(f"Success: {var_name} set to {value} system-wide via Registry.")
+
+        elif os_type in ["Linux", "Darwin"]:  # Darwin is macOS
+            # /etc/environment is the standard for Linux; macOS usually uses shell-specific profiles,
+            # but for a "forever" system-wide approach, we append to /etc/environment or /etc/profile
+            target_file = "/etc/environment"
+            
+            # Check if it's already there to avoid duplicates
+            if os.path.exists(target_file):
+                with open(target_file, 'r') as f:
+                    if f"{var_name}={value}" in f.read():
+                        print(f"Setting already exists in {target_file}.")
+                        return
+
+            # Append the export line
+            line = f'\n{var_name}={value}\n'
+            with open(target_file, 'a') as f:
+                f.write(line)
+            print(f"Success: {var_name} added to {target_file}.")
+
+        else:
+            print(f"Unsupported OS: {os_type}")
+            return
+
+        print("\nNOTE: You must restart your Terminal or Reboot for changes to take effect.")
+
+    except PermissionError:
+        print("\nERROR: Access Denied. Please run this script as Administrator (Windows) or with sudo (Linux/macOS).")
+    except Exception as e:
+        print(f"\nAn error occurred: {e}")
+
+
 def normalize_patterns(patterns):
     return [p.lower() for p in patterns] if patterns else []
 
@@ -97,6 +155,9 @@ def list_files(base_path,
 
 
 if __name__ == "__main__":
+
+    #prevent creation of .pyc files
+    set_permanent_python_no_bytecode()
     #log only to stderr
     logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
 
@@ -108,8 +169,15 @@ if __name__ == "__main__":
     parser.add_argument("--exclude-files", help="Comma-separated list of file name patterns to exclude (e.g. '*proxy*').")
     parser.add_argument("--include-folders", help="Comma-separated list of folder patterns to include.")
     parser.add_argument("--exclude-folders", help="Comma-separated list of folder patterns to exclude.")
-    parser.add_argument("--report", help="Write results to JSON report file (e.g. 'c:\\temp\\report.json').")
-    parser.add_argument("--output-json", help="Optional: path to output JSON file containing found files.")
+    
+    # MongoDB arguments
+    parser.add_argument("--connection_string", help="MongoDB connection string. If provided, results will be written to MongoDB.")
+    parser.add_argument("--db_name", help="MongoDB database name.")
+    parser.add_argument("--collection_name", help="MongoDB collection name.")
+    parser.add_argument("--match_field", help="Field name to match the document for updating.")
+    parser.add_argument("--match_value", help="Value to identify the target entry in the match_field.")
+    parser.add_argument("--new_field_name", help="Name of the field to add the found files list to.")
+
 
     args = parser.parse_args()
 
@@ -128,31 +196,30 @@ if __name__ == "__main__":
 
     print(json.dumps(result, indent=2))
 
-    # Format results based on output type
-    if args.report:
-        # Create JSON objects with original_file key for each file
-        report_data = [{"original_file": filepath} for filepath in result]
-        # Write to report file
+    # If MongoDB arguments are provided, upsert the result
+    if all([args.connection_string, args.db_name, args.collection_name, args.match_field, args.match_value, args.new_field_name]):
+        logger = logging.getLogger(__name__)
         try:
-            report_dir = os.path.dirname(args.report)
-            if report_dir:
-                os.makedirs(report_dir, exist_ok=True)
-            with open(args.report, 'w', encoding='utf-8') as f:
-                json.dump(report_data, f, indent=2)
-            logging.debug(f"Report written to: {args.report}")
-        except Exception as e:
-            logging.debug(f"Error writing report file: {e}", file=sys.stderr)
-            sys.exit(1)
+            with MongoUpsert(
+                connection_string=args.connection_string,
+                db_name=args.db_name,
+                collection_name=args.collection_name,
+                logger=logger
+            ) as mongo:
+                filter_query = {args.match_field: args.match_value}
+                update_data = {args.new_field_name: result}
+                upsert_result = mongo.upsert(filter_query, update_data)
 
-    if args.output_json:
-        try:
-            out_dir = os.path.dirname(args.output_json)
-            if out_dir:
-                os.makedirs(out_dir, exist_ok=True)
-            with open(args.output_json, 'w', encoding='utf-8') as f:
-                json.dump(result, f, indent=2)
-            logging.debug(f"Output JSON written to: {args.output_json}")
+                if upsert_result.matched_count > 0 or upsert_result.upserted_id is not None:
+                    logger.info(f"Successfully updated or inserted document in '{args.db_name}.{args.collection_name}'.")
+                    if upsert_result.upserted_id:
+                        logger.info(f"New document inserted with ID: {upsert_result.upserted_id}")
+                    else:
+                        logger.info(f"Matched {upsert_result.matched_count} document(s) and modified {upsert_result.modified_count}.")
+                else:
+                    logger.warning(f"No document found matching query: {filter_query}")
+                    sys.exit(2)
+
         except Exception as e:
-            logging.debug(f"Error writing output JSON file: {e}", file=sys.stderr)
+            logger.error(f"An error occurred during MongoDB operation: {e}")
             sys.exit(1)
-    
