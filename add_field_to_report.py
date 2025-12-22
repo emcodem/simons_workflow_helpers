@@ -10,6 +10,22 @@ import os
 import argparse
 import time
 
+
+# 1. Check the environment variable directly
+bytecode_env = os.environ.get("PYTHONDONTWRITEBYTECODE")
+
+# 2. Check Python's internal flag (derived from the env var)
+internal_flag = sys.dont_write_bytecode
+
+print(f"Environment Variable: {bytecode_env}")
+print(f"Python Internal Flag: {internal_flag}")
+
+if internal_flag:
+    print("No bytecode (__pycache__) will be written, as expected.")
+else:
+    print("ERROR: Python is still set to write bytecode. This can prevent python scripts from running correctly on busy NAS.")
+
+
 # Resolve custom libs folder if using --target
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LIBS_DIR = os.path.join(BASE_DIR, "libs")
