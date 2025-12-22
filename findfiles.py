@@ -6,6 +6,57 @@ import fnmatch
 import argparse
 import logging
 
+
+import os
+import platform
+import subprocess
+import sys
+
+def set_permanent_python_no_bytecode():
+    os_type = platform.system()
+    var_name = "PYTHONDONTWRITEBYTECODE"
+    value = "1"
+
+    print(f"Detected OS: {os_type}")
+
+    try:
+        if os_type == "Windows":
+            # setx /M sets the variable at the System (Machine) level
+            # This writes to the Registry: HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment
+            cmd = f'setx {var_name} "{value}" /M'
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+            print(f"Success: {var_name} set to {value} system-wide via Registry.")
+
+        elif os_type in ["Linux", "Darwin"]:  # Darwin is macOS
+            # /etc/environment is the standard for Linux; macOS usually uses shell-specific profiles,
+            # but for a "forever" system-wide approach, we append to /etc/environment or /etc/profile
+            target_file = "/etc/environment"
+            
+            # Check if it's already there to avoid duplicates
+            if os.path.exists(target_file):
+                with open(target_file, 'r') as f:
+                    if f"{var_name}={value}" in f.read():
+                        print(f"Setting already exists in {target_file}.")
+                        return
+
+            # Append the export line
+            line = f'\n{var_name}={value}\n'
+            with open(target_file, 'a') as f:
+                f.write(line)
+            print(f"Success: {var_name} added to {target_file}.")
+
+        else:
+            print(f"Unsupported OS: {os_type}")
+            return
+
+        print("\nNOTE: You must restart your Terminal or Reboot for changes to take effect.")
+
+    except PermissionError:
+        print("\nERROR: Access Denied. Please run this script as Administrator (Windows) or with sudo (Linux/macOS).")
+    except Exception as e:
+        print(f"\nAn error occurred: {e}")
+
+
 def normalize_patterns(patterns):
     return [p.lower() for p in patterns] if patterns else []
 
@@ -99,7 +150,7 @@ def list_files(base_path,
 if __name__ == "__main__":
     #log only to stderr
     logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
-
+    set_permanent_python_no_bytecode()
     parser = argparse.ArgumentParser(
         description="Recursively list files with separate include/exclude filters for files and folders."
     )
