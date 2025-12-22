@@ -1,102 +1,3 @@
-"""
-Lightweight shim of MongoUpsert for local testing.
-
-This shim provides a minimal in-memory implementation used only for
-testing `add_field_to_report.py` when a real MongoDB-backed
-`mongo_upsert.py` isn't present.
-
-It implements a context manager `MongoUpsert` with an `upsert`
-method and a `collection.drop()` convenience method.
-"""
-from types import SimpleNamespace
-import threading
-import time
-
-# Global in-memory stores keyed by (db_name, collection_name)
-_STORES = {}
-_LOCK = threading.Lock()
-_ID_COUNTER = 1
-
-class _CollectionShim:
-    def __init__(self, store_key):
-        self._store_key = store_key
-
-    def drop(self):
-        with _LOCK:
-            _STORES[self._store_key] = []
-
-class MongoUpsert:
-    def __init__(self, connection_string, db_name, collection_name, logger=None, delete_after=None):
-        self.connection_string = connection_string
-        self.db_name = db_name
-        self.collection_name = collection_name
-        self.logger = logger
-        self.delete_after = delete_after
-        self._key = (db_name, collection_name)
-        with _LOCK:
-            if self._key not in _STORES:
-                _STORES[self._key] = []
-        self.collection = _CollectionShim(self._key)
-
-    def __enter__(self):
-        if self.logger:
-            self.logger.info("(shim) Connected to in-memory Mongo store")
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        if self.logger:
-            self.logger.info("(shim) Closing in-memory Mongo store connection")
-        return False
-
-    def upsert(self, filter_query, update_data):
-        """Perform an in-memory upsert. Returns a SimpleNamespace resembling pymongo result."""
-        global _ID_COUNTER
-        matched_count = 0
-        modified_count = 0
-        upserted_id = None
-
-        with _LOCK:
-            store = _STORES[self._key]
-            # naive match: check if all key/value pairs exist in doc
-            found = None
-            for doc in store:
-                ok = True
-                for k, v in filter_query.items():
-                    if doc.get(k) != v:
-                        ok = False
-                        break
-                if ok:
-                    found = doc
-                    break
-
-            now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-            if found is None:
-                # insert
-                doc = {**filter_query}
-                # apply update_data as direct fields (behaviour chosen for testing)
-                doc.update(update_data)
-                doc['date_created'] = now
-                doc['date_modified'] = now
-                doc['_id'] = f"shim-{_ID_COUNTER}"
-                _ID_COUNTER += 1
-                store.append(doc)
-                upserted_id = doc['_id']
-                matched_count = 0
-                modified_count = 0
-            else:
-                # update
-                for k, v in update_data.items():
-                    found[k] = v
-                found['date_modified'] = now
-                matched_count = 1
-                modified_count = 1
-
-        # Return simple object with attributes expected by the caller
-        return SimpleNamespace(
-            matched_count=matched_count,
-            modified_count=modified_count,
-            upserted_id=upserted_id,
-        )
 #!/usr/bin/env python3
 """
 A reusable module to provide easy read/write access to a MongoDB collection.
@@ -106,6 +7,7 @@ import sys
 import argparse
 import time
 import logging
+import json
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LIBS_DIR = os.path.join(BASE_DIR, "libs")

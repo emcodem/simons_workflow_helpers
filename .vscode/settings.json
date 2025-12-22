@@ -1,5 +1,8 @@
 {
     "security.allowedUNCHosts": [
         "SeriousNexis","desktop-3vmpan6"
+    ],
+    "python.analysis.extraPaths": [
+        "./libs"
     ]
 }
