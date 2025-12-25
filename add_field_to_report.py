@@ -91,10 +91,11 @@ def acquire_lock_with_stale_handling(lock_path, timeout):
 def main():
     parser = argparse.ArgumentParser(description="Add a field to a report JSON entry safely.")
     parser.add_argument("--report_json", required=True, help="Path to the report JSON file.")
-    parser.add_argument("--match_value", required=True, help="Value to identify the target entry (matches any field value).")
+    parser.add_argument("--match_value", required=False, help="Value to identify the target entry (matches any field value).")
     parser.add_argument("--value_to_add", required=True, help="String or path to a file (file contents added; JSON parsed if possible).")
     parser.add_argument("--value_from_file", required=False, action='store_true', help="attach contents of --value_to_add")
     parser.add_argument("--new_field_name", required=True, help="Name of the field to add to the matched entry.")
+    parser.add_argument("--create_report", required=False, action='store_true', help="Create a new report file if it doesn't exist.")
     parser.add_argument("--lock_timeout", type=int, default=30, help="Timeout in seconds to acquire the file lock.")
     args = parser.parse_args()
 
@@ -103,6 +104,7 @@ def main():
     value_to_add = args.value_to_add
     new_field_name = args.new_field_name
     lock_timeout = args.lock_timeout
+    create_report = args.create_report
 
     added_value = value_to_add
     if (args.value_from_file):
@@ -115,32 +117,45 @@ def main():
         # Acquire lock with stale detection
         lock = acquire_lock_with_stale_handling(lock_path, timeout=lock_timeout)
         with lock:
-            # Load report and add entry
-            with open(report_path, 'r', encoding='utf-8-sig') as f:
-                report = json.load(f)
+            # Load or create report
+            if create_report and not os.path.exists(report_path):
+                # Create directories recursively if needed
+                report_dir = os.path.dirname(os.path.abspath(report_path))
+                if report_dir:
+                    os.makedirs(report_dir, exist_ok=True)
+                # Create new report with initial entry
+
+                report = [{new_field_name: match_value, new_field_name: added_value}]
+                print(f"Created new report: {report_path}")
+            else:
+                # Load existing report
+                with open(report_path, 'r', encoding='utf-8-sig') as f:
+                    report = json.load(f)
 
             #print(f"------------------ Original report: {report_path} ------------------")
             #print(json.dumps(report, indent=2))
 
-            found = False
-            for entry in report:
-                for k, v in entry.items():
-                    v_str = str(v)
-                    if os.path.exists(match_value):
-                        if os.path.abspath(v_str) == os.path.abspath(match_value):
+            # If we just created the report, skip the find-and-update logic
+            if not (create_report and not os.path.exists(report_path)):
+                found = False
+                for entry in report:
+                    for k, v in entry.items():
+                        v_str = str(v)
+                        if os.path.exists(match_value):
+                            if os.path.abspath(v_str) == os.path.abspath(match_value):
+                                entry[new_field_name] = added_value
+                                found = True
+                                break
+                        elif v_str == match_value:
                             entry[new_field_name] = added_value
                             found = True
                             break
-                    elif v_str == match_value:
-                        entry[new_field_name] = added_value
-                        found = True
+                    if found:
                         break
-                if found:
-                    break
 
-            if not found:
-                print(f"No entry found matching value: {match_value}", file=sys.stderr)
-                sys.exit(2)
+                if not found:
+                    print(f"No entry found matching value: {match_value}", file=sys.stderr)
+                    sys.exit(2)
 
             # Write updated report
             with open(report_path, 'w', encoding='utf-8') as f:
