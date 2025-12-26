@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Add a field to a report JSON entry safely using SoftFileLock,
-with stale lock detection (force remove if older than 10 seconds).
+Add a field to a report JSON entry safely.
 """
 
 import sys
@@ -31,10 +30,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LIBS_DIR = os.path.join(BASE_DIR, "libs")
 sys.path.insert(0, LIBS_DIR)
 
-from filelock import SoftFileLock, Timeout
-
-STALE_LOCK_AGE = 1000  # seconds
-
 def is_json_file(filepath):
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
@@ -51,40 +46,7 @@ def load_file_value(filepath):
     except Exception:
         return content
 
-import time
 
-def acquire_lock_with_stale_handling(lock_path, timeout):
-    """
-    Attempt to acquire a SoftFileLock.
-    If the lock file is older than STALE_LOCK_AGE seconds, force-remove it and retry.
-    Raises Timeout if total wait exceeds `timeout`.
-    """
-    start_time = time.time()
-    start_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start_time))
-    print(f"Attempting to get filelock on {lock_path}")
-    print(f"Start time: {start_time_str}")
-
-    while True:
-        lock = SoftFileLock(lock_path, timeout=5)
-        try:
-            lock.acquire(timeout=5)
-            print ("Lock acquired: " +lock_path)
-            return lock  # acquired successfully
-        except Timeout:
-            # Check for stale lock
-            if os.path.exists(lock_path):
-                age = time.time() - os.path.getmtime(lock_path)
-                if age > STALE_LOCK_AGE:
-                    try:
-                        os.remove(lock_path)
-                        print(f"Removed stale lock: {lock_path}")
-                    except Exception as e:
-                        print(f"Failed to remove stale lock: {e}", file=sys.stderr)
-            # Check overall timeout
-            elapsed = time.time() - start_time
-            if elapsed >= timeout:
-                raise Timeout(f"Could not get lock to {lock_path} after {timeout} seconds.")
-        time.sleep(1)
 
 
 
@@ -103,71 +65,64 @@ def main():
     match_value = args.match_value
     value_to_add = args.value_to_add
     new_field_name = args.new_field_name
-    lock_timeout = args.lock_timeout
+    lock_timeout = args.lock_timeout #lock timeout deprecated
     create_report = args.create_report
 
     added_value = value_to_add
     if (args.value_from_file):
             added_value = load_file_value(value_to_add)
 
-    # Lock path
-    lock_path = report_path + ".lock"
-
     try:
-        # Acquire lock with stale detection
-        lock = acquire_lock_with_stale_handling(lock_path, timeout=lock_timeout)
-        with lock:
-            # Load or create report
-            if create_report and not os.path.exists(report_path):
-                # Create directories recursively if needed
-                report_dir = os.path.dirname(os.path.abspath(report_path))
-                if report_dir:
-                    os.makedirs(report_dir, exist_ok=True)
-                # Create new report with initial entry
+        # Load or create report
+        if create_report and not os.path.exists(report_path):
+            # Create directories recursively if needed
+            report_dir = os.path.dirname(os.path.abspath(report_path))
+            if report_dir:
+                os.makedirs(report_dir, exist_ok=True)
+            # Create new report with initial entry
 
-                report = [{new_field_name: match_value, new_field_name: added_value}]
-                print(f"Created new report: {report_path}")
-            else:
-                # Load existing report
-                with open(report_path, 'r', encoding='utf-8-sig') as f:
-                    report = json.load(f)
+            report = [{new_field_name: added_value}]
+            print(f"Created new report: {report_path}")
+        else:
+            # Load existing report
+            with open(report_path, 'r', encoding='utf-8-sig') as f:
+                report = json.load(f)
 
-            #print(f"------------------ Original report: {report_path} ------------------")
-            #print(json.dumps(report, indent=2))
+        #print(f"------------------ Original report: {report_path} ------------------")
+        #print(json.dumps(report, indent=2))
 
-            # If we just created the report, skip the find-and-update logic
-            if not (create_report and not os.path.exists(report_path)):
-                found = False
-                for entry in report:
-                    for k, v in entry.items():
-                        v_str = str(v)
-                        if os.path.exists(match_value):
-                            if os.path.abspath(v_str) == os.path.abspath(match_value):
-                                entry[new_field_name] = added_value
-                                found = True
-                                break
-                        elif v_str == match_value:
+        # If we just created the report, skip the find-and-update logic
+        if not (create_report and not os.path.exists(report_path)):
+            found = False
+            for entry in report:
+                for k, v in entry.items():
+                    v_str = str(v)
+                    if os.path.exists(match_value):
+                        if os.path.abspath(v_str) == os.path.abspath(match_value):
                             entry[new_field_name] = added_value
                             found = True
                             break
-                    if found:
+                    elif v_str == match_value:
+                        entry[new_field_name] = added_value
+                        found = True
                         break
+                if found:
+                    break
 
-                if not found:
-                    print(f"No entry found matching value: {match_value}", file=sys.stderr)
-                    sys.exit(2)
+            if not found:
+                print(f"No entry found matching value: {match_value}", file=sys.stderr)
+                sys.exit(2)
 
-            # Write updated report
-            with open(report_path, 'w', encoding='utf-8') as f:
-                json.dump(report, f, indent=2)
-                print(f"[OK] Report written: {report_path}")
-            
-            #print(f"------------------ Updated report: {report_path} ------------------")
-            #print(json.dumps(report, indent=2))
-
-    except Timeout as e:
-        print(str(e), file=sys.stderr)
-        sys.exit(5)
+        # Write updated report
+        with open(report_path, 'w', encoding='utf-8') as f:
+            json.dump(report, f, indent=2)
+            print(f"[OK] Report written: {report_path}")
+        
+        #print(f"------------------ Updated report: {report_path} ------------------")
+        #print(json.dumps(report, indent=2))
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
