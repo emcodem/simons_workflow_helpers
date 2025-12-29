@@ -3,10 +3,13 @@
 Add a field to a report JSON entry safely.
 """
 
+import logging
+import shlex
 import sys
 import json
 import os
 import argparse
+import pprint
 import time
 
 
@@ -19,16 +22,16 @@ internal_flag = sys.dont_write_bytecode
 print(f"Environment Variable: {bytecode_env}")
 print(f"Python Internal Flag: {internal_flag}")
 
-if internal_flag:
-    print("No bytecode (__pycache__) will be written, as expected.")
-else:
-    print("ERROR: Python is still set to write bytecode. This can prevent python scripts from running correctly on busy NAS.")
+# if internal_flag:
+#     print("No bytecode (__pycache__) will be written, as expected.")
+# else:
+#     print("ERROR: Python is still set to write bytecode. This can prevent python scripts from running correctly on busy NAS.")
 
 
 # Resolve custom libs folder if using --target
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LIBS_DIR = os.path.join(BASE_DIR, "libs")
-sys.path.insert(0, LIBS_DIR)
+# BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# LIBS_DIR = os.path.join(BASE_DIR, "libs")
+# sys.path.insert(0, LIBS_DIR)
 
 def is_json_file(filepath):
     try:
@@ -59,13 +62,28 @@ def main():
     parser.add_argument("--new_field_name", required=True, help="Name of the field to add to the matched entry.")
     parser.add_argument("--create_report", required=False, action='store_true', help="Create a new report file if it doesn't exist.")
     parser.add_argument("--lock_timeout", type=int, default=30, help="Timeout in seconds to acquire the file lock.")
-    args = parser.parse_args()
 
+    logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
+    global ffas_py_args
+    ffas_py_args = ffas_py_args.decode('utf-8') if 'ffas_py_args' in globals() else False
+    if ffas_py_args:
+        # Parse from environment variable using shlex to handle quoted strings
+        args_list = shlex.split(ffas_py_args)
+        logging.info(f"Parsing arguments from ffas_py_args: {ffas_py_args}")
+        logging.info(f"Arguments list: {args_list}")
+    else:
+        # Use command line arguments
+        args_list = sys.argv[1:]
+        logging.info(f"Parsing arguments from sys.argv: {args_list}")
+
+    args = parser.parse_args(args_list)
+    pprint.pprint(vars(args))
+
+    
     report_path = args.report_json
     match_value = args.match_value
     value_to_add = args.value_to_add
     new_field_name = args.new_field_name
-    lock_timeout = args.lock_timeout #lock timeout deprecated
     create_report = args.create_report
 
     added_value = value_to_add
@@ -115,13 +133,13 @@ def main():
 
         # Write updated report
         with open(report_path, 'w', encoding='utf-8') as f:
-            json.dump(report, f, indent=2)
+            json.dump(report, f, indent=2,ensure_ascii=False)
             print(f"[OK] Report written: {report_path}")
         
         #print(f"------------------ Updated report: {report_path} ------------------")
-        #print(json.dumps(report, indent=2))
+        #print(json.dumps(report, indent=2, ensure_ascii=False))
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        logging.error(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":

@@ -7,6 +7,9 @@ At the end of the workflow, this script merges the full report with branch repor
 Finds entries by original_file and replaces them in the full report.
 """
 
+import logging
+import pprint
+from shlex import shlex
 import sys
 import json
 import os
@@ -14,10 +17,25 @@ import argparse
 
 
 def main():
+    global ffas_py_args
+
+
     parser = argparse.ArgumentParser(description="Merge branch reports into a full report.")
     parser.add_argument("--full_report", required=True, help="Path to the full report JSON file.")
     parser.add_argument("--branch_report_dir", required=True, help="Directory containing branch report JSON files.")
-    args = parser.parse_args()
+
+    ffas_py_args = ffas_py_args.decode('utf-8') if 'ffas_py_args' in globals() else False
+    if ffas_py_args:
+        # Parse from environment variable using shlex to handle quoted strings
+        args_list = shlex.split(ffas_py_args)
+        logging.info(f"Parsing arguments from ffas_py_args: {ffas_py_args}")
+    else:
+        # Use command line arguments
+        args_list = sys.argv[1:]
+        logging.info(f"Parsing arguments from sys.argv: {args_list}")
+
+    args = parser.parse_args(args_list)
+    pprint.pprint(vars(args))
 
     full_report_path = args.full_report
     branch_report_dir = args.branch_report_dir
@@ -69,7 +87,7 @@ def main():
 
     # Write updated full report
     with open(full_report_path, 'w', encoding='utf-8') as f:
-        json.dump(full_report, f, indent=2)
+        json.dump(full_report, f, indent=2,ensure_ascii=False)
         print(f"[OK] Full report updated: {full_report_path}")
 
 

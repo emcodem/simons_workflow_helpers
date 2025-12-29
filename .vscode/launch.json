@@ -7,7 +7,7 @@
                 "request": "launch",
                 "program": "${workspaceFolder}/findfiles.py",
                 "args": [
-                    "C:\\temp\\1file",
+                    "C:\\temp\\1avid\\avci",
                     "--include-files", "*.mxf,*.mov,*.mp4",
                     "--report", "c:/._ffastrans_work_root/20251120-1855-1414-8b3a-f84d633bdf8f/20251122-1648-4938-27a4-8b16f4db840c/report.json",
                     "--output-json", "c:/temp/found_files.json"
