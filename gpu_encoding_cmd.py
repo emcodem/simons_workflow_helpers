@@ -1,6 +1,3 @@
-import logging
-import os
-import shlex
 import sys
 import re
 import subprocess
@@ -89,17 +86,6 @@ def print_diff(original: str, modified: str):
 
 
 def main():
-    global ffas_py_args
-    ffas_py_args = ffas_py_args.decode('utf-8') if 'ffas_py_args' in globals() else False
-    if ffas_py_args:
-        # Parse from environment variable using shlex to handle quoted strings
-        args_list = shlex.split(ffas_py_args)
-        logging.info(f"Parsing arguments from ffas_py_args: {ffas_py_args}")
-    else:
-        # Use command line arguments
-        args_list = sys.argv[1:]
-        logging.info(f"Parsing arguments from sys.argv: {args_list}")
-
     parser = argparse.ArgumentParser(description="Apply transformation rules to FFmpeg command and execute it.")
     parser.add_argument("command_file", help="Path to the command file to read")
     parser.add_argument("--additional-options", default="-preset p5 -rc vbr_hq -cq 22 -b:v 0 -g 50 -bf 3", help="Additional options to pass (optional, default -preset p4 -g 50)")
@@ -110,7 +96,7 @@ def main():
     parser.add_argument("--insert_filter", default="", help="inserts the specified line into filters, e.g. format=yuv422p")
     parser.add_argument("--test", help="Test mode: print modified command without executing it", action='store_true')
 
-    args = parser.parse_args(args_list)
+    args = parser.parse_args()
     cmd_file_path = Path(args.command_file)
     additional_options = args.additional_options
     replace_output = args.replace_output
@@ -199,7 +185,7 @@ def main():
             else:
                 print(f"Warning: Output file not found: {args.replace_output}")
 
-        #sys.exit(return_code)
+        sys.exit(return_code)
     except Exception as e:
         print(f"Error executing command: {e}")
         sys.exit(1)

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import os
-import shlex
 import sys
 import json
 import fnmatch
@@ -12,7 +11,6 @@ import os
 import platform
 import subprocess
 import sys
-
 
 def normalize_patterns(patterns):
     return [p.lower() for p in patterns] if patterns else []
@@ -106,20 +104,8 @@ def list_files(base_path,
 
 if __name__ == "__main__":
     #log only to stderr
-    global result
-    global ffas_py_args
     logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
     
-    ffas_py_args = ffas_py_args.decode('utf-8') if 'ffas_py_args' in globals() else False
-    if ffas_py_args:
-        # Parse from environment variable using shlex to handle quoted strings
-        args_list = shlex.split(ffas_py_args)
-        logging.info(f"Parsing arguments from ffas_py_args: {ffas_py_args}")
-    else:
-        # Use command line arguments
-        args_list = sys.argv[1:]
-        logging.info(f"Parsing arguments from sys.argv: {args_list}")
-        
     parser = argparse.ArgumentParser(
         description="Recursively list files with separate include/exclude filters for files and folders."
     )
@@ -131,7 +117,7 @@ if __name__ == "__main__":
     parser.add_argument("--report", help="Write results to JSON report file (e.g. 'c:\\temp\\report.json').")
     parser.add_argument("--output-json", help="Optional: path to output JSON file containing found files.")
 
-    args = parser.parse_args(args_list)
+    args = parser.parse_args()
 
     include_files = args.include_files.split(",") if args.include_files else []
     exclude_files = args.exclude_files.split(",") if args.exclude_files else []
@@ -146,8 +132,7 @@ if __name__ == "__main__":
         exclude_folders=exclude_folders,
     )
 
-
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    print(json.dumps(result, indent=2))
 
     # Format results based on output type
     if args.report:
@@ -159,7 +144,7 @@ if __name__ == "__main__":
             if report_dir:
                 os.makedirs(report_dir, exist_ok=True)
             with open(args.report, 'w', encoding='utf-8') as f:
-                json.dump(report_data, f, indent=2, ensure_ascii=False)
+                json.dump(report_data, f, indent=2)
             logging.debug(f"Report written to: {args.report}")
         except Exception as e:
             logging.debug(f"Error writing report file: {e}", file=sys.stderr)
@@ -171,10 +156,8 @@ if __name__ == "__main__":
             if out_dir:
                 os.makedirs(out_dir, exist_ok=True)
             with open(args.output_json, 'w', encoding='utf-8') as f:
-                json.dump(result, f, indent=2, ensure_ascii=False)
+                json.dump(result, f, indent=2)
             logging.debug(f"Output JSON written to: {args.output_json}")
         except Exception as e:
             logging.debug(f"Error writing output JSON file: {e}", file=sys.stderr)
             sys.exit(1)
-
-    #result = json.dumps(result, indent=2)
