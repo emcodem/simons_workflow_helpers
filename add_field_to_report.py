@@ -8,22 +8,21 @@ import json
 import os
 import argparse
 import time
+import logging
 
 
-# 1. Check the environment variable directly
-bytecode_env = os.environ.get("PYTHONDONTWRITEBYTECODE")
-
-# 2. Check Python's internal flag (derived from the env var)
-internal_flag = sys.dont_write_bytecode
-
-print(f"Environment Variable: {bytecode_env}")
-print(f"Python Internal Flag: {internal_flag}")
-
-if internal_flag:
-    print("No bytecode (__pycache__) will be written, as expected.")
-else:
-    print("ERROR: Python is still set to write bytecode. This can prevent python scripts from running correctly on busy NAS.")
-
+# Set up logging
+script_name = os.path.basename(__file__)
+log_filename = f"c:\\temp\\{script_name}_{int(time.time() * 1000)}.log"
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),  # Log to stdout
+        logging.FileHandler(log_filename)   # Log to file
+    ]
+)
+logging.info(f"Logging to file: {log_filename}")
 
 # Resolve custom libs folder if using --target
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -82,7 +81,7 @@ def main():
             # Create new report with initial entry
 
             report = [{new_field_name: match_value, new_field_name: added_value}]
-            print(f"Created new report: {report_path}")
+            logging.info(f"Created new report: {report_path}")
         else:
             # Load existing report
             with open(report_path, 'r', encoding='utf-8-sig') as f:
@@ -110,18 +109,18 @@ def main():
                     break
 
             if not found:
-                print(f"No entry found matching value: {match_value}", file=sys.stderr)
+                logging.error(f"No entry found matching value: {match_value}")
                 sys.exit(2)
 
         # Write updated report
         with open(report_path, 'w', encoding='utf-8') as f:
             json.dump(report, f, indent=2)
-            print(f"[OK] Report written: {report_path}")
+            logging.info(f"[OK] Report written: {report_path}")
         
         #print(f"------------------ Updated report: {report_path} ------------------")
         #print(json.dumps(report, indent=2))
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        logging.error(f"Error: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":

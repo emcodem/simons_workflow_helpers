@@ -4,6 +4,23 @@ import subprocess
 from pathlib import Path
 import difflib
 import argparse
+import os
+import time
+import logging
+
+
+# Set up logging
+script_name = os.path.basename(__file__)
+log_filename = f"c:\\temp\\{script_name}_{int(time.time() * 1000)}.log"
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),  # Log to stdout
+        logging.FileHandler(log_filename)   # Log to file
+    ]
+)
+logging.info(f"Logging to file: {log_filename}")
 
 
 def apply_rules(command_line: str, args) -> str:
@@ -71,18 +88,18 @@ def print_diff(original: str, modified: str):
     Print a human-readable word-level diff between two strings.
     """
     diff = difflib.Differ().compare(original.split(), modified.split())
-    print("==== COMMAND DIFFERENCES ====")
+    logging.info("==== COMMAND DIFFERENCES ====")
     for line in diff:
         # Highlight additions and deletions only
         if line.startswith("+ "):
-            print(f"\033[92m{line}\033[0m")  # green = added
+            logging.info(f"\033[92m{line}\033[0m")  # green = added
         elif line.startswith("- "):
-            print(f"\033[91m{line}\033[0m")  # red = removed
-    print (modified)
+            logging.info(f"\033[91m{line}\033[0m")  # red = removed
+    logging.info(modified)
         # Uncomment to show unchanged tokens:
         # elif line.startswith("  "):
-        #     print(line)
-    print("=============================\n")
+        #     logging.info(line)
+    logging.info("=============================\n")
 
 
 def main():
@@ -101,27 +118,27 @@ def main():
     additional_options = args.additional_options
     replace_output = args.replace_output
     # Print parsed arguments dynamically
-    print("==== PARSED ARGUMENTS ====")
+    logging.info("==== PARSED ARGUMENTS ====")
     for arg_name, arg_value in vars(args).items():
         if arg_value is not None and arg_value != "":
-            print(f"{arg_name.replace('_', ' ').title()}: {arg_value}")
-    print("===========================\n")
+            logging.info(f"{arg_name.replace('_', ' ').title()}: {arg_value}")
+    logging.info("===========================\n")
 
 
     if not cmd_file_path.exists():
-        print(f"Error: File not found: {cmd_file_path}")
+        logging.error(f"Error: File not found: {cmd_file_path}")
         sys.exit(1)
 
     # Read command
     with cmd_file_path.open('r', encoding='utf-8') as f:
         original_cmd = f.read().strip()
-    print(f"==== original_cmd contents ====")
-    print(original_cmd)
-    print("====================\n")
+    logging.info(f"==== original_cmd contents ====")
+    logging.info(original_cmd)
+    logging.info("====================\n")
     
     if (args.replace_output and original_cmd.find("bmxtranswrap") != -1):
         # Replace output file in original_cmd with replace_output
-        print(f"Error: replace_output is set but the original cmd contained bmxtranswrap, this is not implemented.")
+        logging.error(f"Error: replace_output is set but the original cmd contained bmxtranswrap, this is not implemented.")
         sys.exit(1)
 
     # Check if bmx_cmd_file is set and read it if exists
@@ -129,21 +146,21 @@ def main():
     if args.bmx_cmd_file:
         has_bmxtranswrap_pipe = bool(re.search(r'\|.*bmxtranswrap', original_cmd))
         if not has_bmxtranswrap_pipe:
-            print("Error: The original ffastrans command does not use bmxtranswrap, but bmx_cmd_file is set.")
+            logging.error("Error: The original ffastrans command does not use bmxtranswrap, but bmx_cmd_file is set.")
             sys.exit(1)
         bmx_cmd_path = Path(args.bmx_cmd_file)
         if not bmx_cmd_path.exists():
-            print(f"Error: BMX command file not found: {bmx_cmd_path}")
+            logging.error(f"Error: BMX command file not found: {bmx_cmd_path}")
             sys.exit(1)
         with bmx_cmd_path.open('r', encoding='utf-8') as f:
             bmx_cmd = f.read().strip()
             bmx_cmd = bmx_cmd.replace("--track-map .+? ", "")  # Escape backslashes for safe insertion
-        print(f"==== bmx_cmd contents ====")
-        print(bmx_cmd)
-        print("====================\n")
+        logging.info(f"==== bmx_cmd contents ====")
+        logging.info(bmx_cmd)
+        logging.info("====================\n")
     
     if not original_cmd:
-        print("Error: Command file is empty.")
+        logging.error("Error: Command file is empty.")
         sys.exit(1)
     
     # Check if original_cmd contains a pipe followed by bmxtranswrap
@@ -159,35 +176,35 @@ def main():
 
     # Test mode: just print the command without executing
     if args.test:
-        print("TEST MODE: Command not executed")
-        print(modified_cmd)
+        logging.info("TEST MODE: Command not executed")
+        logging.info(modified_cmd)
         sys.exit(0)
 
     # Execute modified command
     try:
-        print("Executing modified command...\n")
-        print(modified_cmd)
+        logging.info("Executing modified command...\n")
+        logging.info(modified_cmd)
         
         # Execute command directly without piping - FFmpeg prefers direct console access
         return_code = subprocess.call(modified_cmd, shell=True)
 
         #encoding done, print result
-        print(f"\nReturn code: {return_code}")
+        logging.info(f"\nReturn code: {return_code}")
 
         # If replace_output was set, check if the file exists and > 0kb
         if args.replace_output:
             output_path = Path(args.replace_output)
             if output_path.exists():
                 file_size_kb = output_path.stat().st_size / 1024
-                print(f"Output file created: {args.replace_output} ({file_size_kb:.2f} KB)")
+                logging.info(f"Output file created: {args.replace_output} ({file_size_kb:.2f} KB)")
                 if file_size_kb == 0:
-                    print("Warning: Output file is empty (0 KB)")
+                    logging.warning("Warning: Output file is empty (0 KB)")
             else:
-                print(f"Warning: Output file not found: {args.replace_output}")
+                logging.warning(f"Warning: Output file not found: {args.replace_output}")
 
         sys.exit(return_code)
     except Exception as e:
-        print(f"Error executing command: {e}")
+        logging.error(f"Error executing command: {e}")
         sys.exit(1)
 
 
