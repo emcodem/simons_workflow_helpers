@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Add a field to a report JSON entry safely using SoftFileLock,
-with stale lock detection (force remove if older than 10 seconds).
+Add a field to a report JSON entry safely.
 """
 
 import sys
@@ -9,31 +8,25 @@ import json
 import os
 import argparse
 import time
+import logging
 
 
-# 1. Check the environment variable directly
-bytecode_env = os.environ.get("PYTHONDONTWRITEBYTECODE")
+# Set up logging
+script_name = os.path.basename(__file__)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),  # Log to stdout
 
-# 2. Check Python's internal flag (derived from the env var)
-internal_flag = sys.dont_write_bytecode
-
-print(f"Environment Variable: {bytecode_env}")
-print(f"Python Internal Flag: {internal_flag}")
-
-if internal_flag:
-    print("No bytecode (__pycache__) will be written, as expected.")
-else:
-    print("ERROR: Python is still set to write bytecode. This can prevent python scripts from running correctly on busy NAS.")
-
+    ]
+)
+logging.info(f"Startup")
 
 # Resolve custom libs folder if using --target
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LIBS_DIR = os.path.join(BASE_DIR, "libs")
 sys.path.insert(0, LIBS_DIR)
-
-from filelock import SoftFileLock, Timeout
-
-STALE_LOCK_AGE = 1000  # seconds
 
 def is_json_file(filepath):
     try:
@@ -51,41 +44,17 @@ def load_file_value(filepath):
     except Exception:
         return content
 
-import time
 
-def acquire_lock_with_stale_handling(lock_path, timeout):
-    """
-    Attempt to acquire a SoftFileLock.
-    If the lock file is older than STALE_LOCK_AGE seconds, force-remove it and retry.
-    Raises Timeout if total wait exceeds `timeout`.
-    """
-    start_time = time.time()
-    start_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start_time))
-    print(f"Attempting to get filelock on {lock_path}")
-    print(f"Start time: {start_time_str}")
 
-    while True:
-        lock = SoftFileLock(lock_path, timeout=5)
-        try:
-            lock.acquire(timeout=5)
-            print ("Lock acquired: " +lock_path)
-            return lock  # acquired successfully
-        except Timeout:
-            # Check for stale lock
-            if os.path.exists(lock_path):
-                age = time.time() - os.path.getmtime(lock_path)
-                if age > STALE_LOCK_AGE:
-                    try:
-                        os.remove(lock_path)
-                        print(f"Removed stale lock: {lock_path}")
-                    except Exception as e:
-                        print(f"Failed to remove stale lock: {e}", file=sys.stderr)
-            # Check overall timeout
-            elapsed = time.time() - start_time
-            if elapsed >= timeout:
-                raise Timeout(f"Could not get lock to {lock_path} after {timeout} seconds.")
-        time.sleep(1)
 
+
+def format_size(bytes_size):
+    """Format bytes to human readable format."""
+    for unit in ['B', 'kB', 'MB', 'GB', 'TB']:
+        if bytes_size < 1024.0:
+            return f"{bytes_size:.1f} {unit}"
+        bytes_size /= 1024.0
+    return f"{bytes_size:.1f} TB"
 
 
 def main():
@@ -97,77 +66,90 @@ def main():
     parser.add_argument("--new_field_name", required=True, help="Name of the field to add to the matched entry.")
     parser.add_argument("--create_report", required=False, action='store_true', help="Create a new report file if it doesn't exist.")
     parser.add_argument("--lock_timeout", type=int, default=30, help="Timeout in seconds to acquire the file lock.")
+    parser.add_argument("--add_file_stats", action='store_true', help="Assumes value is a file path and adds file stats.")
     args = parser.parse_args()
 
     report_path = args.report_json
     match_value = args.match_value
     value_to_add = args.value_to_add
     new_field_name = args.new_field_name
-    lock_timeout = args.lock_timeout
+    lock_timeout = args.lock_timeout #lock timeout deprecated
     create_report = args.create_report
 
     added_value = value_to_add
     if (args.value_from_file):
             added_value = load_file_value(value_to_add)
 
-    # Lock path
-    lock_path = report_path + ".lock"
+    # Add file stats if requested
+    file_stats = None
+    if args.add_file_stats:
+        try:
+            stat = os.stat(value_to_add)
+            file_stats = {
+                'size': format_size(stat.st_size),
+                'modified': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stat.st_mtime)),
+                'created': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stat.st_ctime))
+            }
+        except Exception as e:
+            logging.warning(f"Could not get file stats for {value_to_add}: {e}")
 
     try:
-        # Acquire lock with stale detection
-        lock = acquire_lock_with_stale_handling(lock_path, timeout=lock_timeout)
-        with lock:
-            # Load or create report
-            if create_report and not os.path.exists(report_path):
-                # Create directories recursively if needed
-                report_dir = os.path.dirname(os.path.abspath(report_path))
-                if report_dir:
-                    os.makedirs(report_dir, exist_ok=True)
-                # Create new report with initial entry
+        # Load or create report
+        if create_report and not os.path.exists(report_path):
+            # Create directories recursively if needed
+            report_dir = os.path.dirname(os.path.abspath(report_path))
+            if report_dir:
+                os.makedirs(report_dir, exist_ok=True)
+            # Create new report with initial entry
 
-                report = [{new_field_name: match_value, new_field_name: added_value}]
-                print(f"Created new report: {report_path}")
-            else:
-                # Load existing report
-                with open(report_path, 'r', encoding='utf-8-sig') as f:
-                    report = json.load(f)
+            report = [{new_field_name: match_value, new_field_name: added_value}]
+            if file_stats:
+                report[0]['file_properties'] = file_stats
+            logging.info(f"Created new report: {report_path}")
+        else:
+            # Load existing report
+            with open(report_path, 'r', encoding='utf-8-sig') as f:
+                report = json.load(f)
 
-            #print(f"------------------ Original report: {report_path} ------------------")
-            #print(json.dumps(report, indent=2))
+        #print(f"------------------ Original report: {report_path} ------------------")
+        #print(json.dumps(report, indent=2))
 
-            # If we just created the report, skip the find-and-update logic
-            if not (create_report and not os.path.exists(report_path)):
-                found = False
-                for entry in report:
-                    for k, v in entry.items():
-                        v_str = str(v)
-                        if os.path.exists(match_value):
-                            if os.path.abspath(v_str) == os.path.abspath(match_value):
-                                entry[new_field_name] = added_value
-                                found = True
-                                break
-                        elif v_str == match_value:
+        # If we just created the report, skip the find-and-update logic
+        if not (create_report and not os.path.exists(report_path)):
+            found = False
+            for entry in report:
+                for k, v in entry.items():
+                    v_str = str(v)
+                    if os.path.exists(match_value):
+                        if os.path.abspath(v_str) == os.path.abspath(match_value):
                             entry[new_field_name] = added_value
+                            if file_stats:
+                                entry['file_properties'] = file_stats
                             found = True
                             break
-                    if found:
+                    elif v_str == match_value:
+                        entry[new_field_name] = added_value
+                        if file_stats:
+                            entry['file_properties'] = file_stats
+                        found = True
                         break
+                if found:
+                    break
 
-                if not found:
-                    print(f"No entry found matching value: {match_value}", file=sys.stderr)
-                    sys.exit(2)
+            if not found:
+                logging.error(f"No entry found matching value: {match_value}")
+                sys.exit(2)
 
-            # Write updated report
-            with open(report_path, 'w', encoding='utf-8') as f:
-                json.dump(report, f, indent=2)
-                print(f"[OK] Report written: {report_path}")
-            
-            #print(f"------------------ Updated report: {report_path} ------------------")
-            #print(json.dumps(report, indent=2))
-
-    except Timeout as e:
-        print(str(e), file=sys.stderr)
-        sys.exit(5)
+        # Write updated report
+        with open(report_path, 'w', encoding='utf-8') as f:
+            json.dump(report, f, indent=2)
+            logging.info(f"[OK] Report written: {report_path}")
+        
+        #print(f"------------------ Updated report: {report_path} ------------------")
+        #print(json.dumps(report, indent=2))
+    except Exception as e:
+        logging.exception(f"Error: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

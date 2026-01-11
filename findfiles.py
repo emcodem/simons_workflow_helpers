@@ -5,7 +5,7 @@ import json
 import fnmatch
 import argparse
 import logging
-
+import time
 
 import os
 import platform
@@ -104,8 +104,19 @@ def list_files(base_path,
 
 if __name__ == "__main__":
     #log only to stderr
-    logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
     
+        # Set up logging
+    script_name = os.path.basename(__file__)
+
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stderr),  # Log to stdout
+        ]
+    )
+    logging.info(f"startup")
+
     parser = argparse.ArgumentParser(
         description="Recursively list files with separate include/exclude filters for files and folders."
     )
