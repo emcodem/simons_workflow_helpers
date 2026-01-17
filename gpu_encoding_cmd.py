@@ -63,6 +63,13 @@ def apply_rules(command_line: str, args) -> str:
     insert_filter += hwupload_cuda_insertion
 
     rules = []
+    
+    # Add search and replace rules from --search-replace arguments
+    if hasattr(args, 'search_replace') and args.search_replace:
+        for search_replace_pair in args.search_replace:
+            search_value, replace_value = search_replace_pair
+            # Use literal string replacement (not regex) to handle commas safely
+            rules.append(('literal', search_value, replace_value))
     #if additional_options contains -cq, remove "-b:v .+? "
     if (additional_options.find("-cq") != -1):
         rules.append((r" -b:v .+? ", " "))
@@ -89,8 +96,15 @@ def apply_rules(command_line: str, args) -> str:
     rules.append((r"-c:v libx264", " -c:v h264_nvenc " + additional_options + " "))
 
     modified = command_line
-    for pattern, replacement in rules:
-        # count=1, only replace the first occurrence
+    for rule in rules:
+        if rule[0] == 'literal':
+            # Literal string replacement (not regex)
+            _, search_value, replace_value = rule
+            modified = modified.replace(search_value, replace_value)
+            logging.debug(f"Applied literal replacement: '{search_value}' -> '{replace_value}'")
+        else:
+            # Regex replacement (original behavior)
+            pattern, replacement = rule[0], rule[1]
             modified = re.sub(pattern, replacement, modified, count=1)
 
     # If assume_source_fps is provided, insert -r <fps> before -i
@@ -216,6 +230,12 @@ def check_duration(input_file: str, output_file: str, ffprobe_path: str, toleran
         logging.info("=======================\n")
         return False
 
+def credential_exists(target):
+    # We list the specific target and look for the "Target:" string in the output
+    cmd = f'cmdkey /list:{target} | findstr "Target:"'
+    result = subprocess.run(cmd, shell=True, capture_output=True)
+    
+    return result.returncode == 0
 
 def main():
     parser = argparse.ArgumentParser(description="Apply transformation rules to FFmpeg command and execute it.")
@@ -228,6 +248,8 @@ def main():
     parser.add_argument("--insert_filter", default="", help="inserts the specified line into filters, e.g. format=yuv422p")
     parser.add_argument("--prepend_audio_filter", default="", help="prepends the specified audio filter to the filter chain (inserts before each [astrX] in filter_complex)")
     parser.add_argument("--remove_shortest", help="Removes -shortest flag from the FFmpeg command", action='store_true')
+    parser.add_argument("--search-replace", nargs=2, action='append', metavar=('SEARCH', 'REPLACE'), 
+                        help="Search and replace string in command (can be used multiple times). Values can contain commas.")
     
     parser.add_argument("--output_root", help="Output root folder to create recursively if it doesn't exist")
     parser.add_argument("--test", help="Test mode: print modified command without executing it", action='store_true')
@@ -239,10 +261,44 @@ def main():
     parser.add_argument("--duration_check_tolerance", type=float, default=2.0, help="Tolerance in seconds for duration check (default: 2.0)")
     parser.add_argument("--check_duration", type=bool, default=False, help="Enable duration check between input and output files (accept True/False, 1/0)")
     
+    #local storage credentials (optional)
+    parser.add_argument("--storage_account", help="if output_root is set, attpemts to store credentials in windows credentials manager (optional)")
+    parser.add_argument("--storage_pass", help="Storage account password for local storage access (optional)")
+
     args = parser.parse_args()
     cmd_file_path = Path(args.command_file)
     additional_options = args.additional_options
     replace_output = args.replace_output
+    
+    if (args.storage_account):
+        #check if output_root and storage_pass are set
+        if (not args.output_root) or (not args.storage_pass):
+            logging.error("Error: --storage_account requires --output_root and --storage_pass to be set.")
+            sys.exit(1)
+        
+        #parse server name/op from output_root
+        _server_name = ""
+        output_root_path = Path(args.output_root)
+        if (output_root_path.drive.startswith("\\\\")):
+            #network path
+            parts = output_root_path.parts
+            if len(parts) >= 2:
+                _server_name = parts[1]
+        else:
+            logging.error("Error: --output_root must be a network path (UNC) when using --storage_account.")
+            sys.exit(1)
+        logging.info(f"Checking Credentials for server: {_server_name}")
+        if (not credential_exists(args.storage_account)):
+            #store credentials
+            logging.info(f"Storing Credentials for account: {args.storage_account}, server: {_server_name}")
+            cmd = f'cmdkey /add:{args.storage_account} /user:{args.storage_account} /pass:{args.storage_pass}'
+            logging.info(f"Executing command: {cmd}")
+            result = subprocess.run(cmd, shell=True, capture_output=True)
+            if result.returncode == 0:
+                logging.info(f"Credentials for {args.storage_account} stored successfully.")
+            else:
+                logging.error(f"Error storing credentials for {args.storage_account}: {result.stderr.decode().strip()}")
+                sys.exit(1)
     
     # Create output_root folder if specified
     if args.output_root:

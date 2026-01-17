@@ -4,7 +4,7 @@ Merge branch reports into a full report.
 Full report is created by files find and resides unmodified until the branches finished. 
 Branch reports are created by each branch at start. 
 At the end of the workflow, this script merges the full report with branch reports in order to feed createaaf with complete data.
-Finds entries by original_file and replaces them in the full report.
+Finds entries by original_file or remaster_file and replaces them in the full report.
 """
 
 import sys
@@ -47,24 +47,25 @@ def main():
             sys.exit(1)
 
         branch_entry = branch_report[0]
-        original_file = branch_entry.get('original_file')
-
-        if not original_file:
-            print(f"Error: {branch_file} does not contain 'original_file' key", file=sys.stderr)
-            sys.exit(1)
-
         
-        # Find and replace the entry in full_report
+        # Try to get matching key (original_file or remaster_file)
+
+        if 'original_file' in branch_entry:
+            match_value = branch_entry['original_file']
+        elif 'remaster_file' in branch_entry:
+            match_value = branch_entry['remaster_file']
+        
+        # Find and replace the entry in full_report by matching the value in any key
         found = False
         for i, entry in enumerate(full_report):
-            if entry.get('original_file') == original_file:
+            if match_value in entry.values():
                 branch_entry['found_branch_report'] = True
                 full_report[i] = branch_entry
                 found = True
                 break
 
         if not found:
-            print(f"Error: original_file '{original_file}' from {branch_file} not found in full_report", file=sys.stderr)
+            print(f"Error: value '{match_value}' from {branch_file} not found in full_report", file=sys.stderr)
             sys.exit(1)
 
     # Write updated full report

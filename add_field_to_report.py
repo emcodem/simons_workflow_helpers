@@ -95,7 +95,7 @@ def main():
 
     try:
         # Load or create report
-        if create_report and not os.path.exists(report_path):
+        if create_report:
             # Create directories recursively if needed
             report_dir = os.path.dirname(os.path.abspath(report_path))
             if report_dir:
@@ -115,7 +115,7 @@ def main():
         #print(json.dumps(report, indent=2))
 
         # If we just created the report, skip the find-and-update logic
-        if not (create_report and not os.path.exists(report_path)):
+        if not create_report:
             found = False
             for entry in report:
                 for k, v in entry.items():
