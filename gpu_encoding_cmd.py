@@ -240,7 +240,7 @@ def credential_exists(target):
 def main():
     parser = argparse.ArgumentParser(description="Apply transformation rules to FFmpeg command and execute it.")
     parser.add_argument("command_file", help="Path to the command file to read")
-    parser.add_argument("--additional-options", help="Additional options to pass (optional, example -preset p4 -g 50)")
+    parser.add_argument("--additional_options", help="Additional options to pass (optional, example -preset p4 -g 50)")
     parser.add_argument("--bmx_cmd_file", help="Path to a file containing a full bmx cmd, prepared to read from pipe. In this case, the ffastrans cmd must end with a bmx cmd already")
     parser.add_argument("--replace_output", help="Path to output file, only works when no bmx is used in ffastrans cmd")
     parser.add_argument("--insert_hwupload_cuda", help="Inserts hwupload_cuda filter as last video filter (before [vstr1] in filter_complex)", action='store_true')
@@ -252,6 +252,8 @@ def main():
                         help="Search and replace string in command (can be used multiple times). Values can contain commas.")
     
     parser.add_argument("--output_root", help="Output root folder to create recursively if it doesn't exist")
+    parser.add_argument("--move_target", help="Once encoding is done, move the output file to this target location (overwrites existing files)")
+    
     parser.add_argument("--test", help="Test mode: print modified command without executing it", action='store_true')
 
     #duration check
@@ -270,6 +272,11 @@ def main():
     additional_options = args.additional_options
     replace_output = args.replace_output
     
+    # Validate that move_target requires output_root to be set
+    if args.move_target and not args.output_root:
+        logging.error("Error: --move_target requires --output_root to be set.")
+        sys.exit(1)
+
     if (args.storage_account):
         #check if output_root and storage_pass are set
         if (not args.output_root) or (not args.storage_pass):
@@ -419,6 +426,48 @@ def main():
             if not duration_match:
                 logging.error("Duration check failed.")
                 return_code = 2  # Set return code to indicate duration check failure
+                
+        # If output_root is set, move all files from output_root to move_target
+        if args.output_root and args.move_target:
+            output_root_path = Path(args.output_root)
+            move_target_path = Path(args.move_target)
+            move_failed = False
+            
+            try:
+                # Create move_target directory if it doesn't exist
+                move_target_path.mkdir(parents=True, exist_ok=True)
+                logging.info(f"Move target directory created (or already exists): {move_target_path}")
+                
+                # Find and move all files from output_root
+                if output_root_path.exists():
+                    files_moved = 0
+                    for file_path in output_root_path.glob('*.*'):
+                        if file_path.is_file():
+                            try:
+                                destination = move_target_path / file_path.name
+                                file_path.replace(destination)
+                                logging.info(f"Moved: {file_path.name} to {move_target_path}")
+                                files_moved += 1
+                            except Exception as e:
+                                logging.error(f"Error moving file {file_path.name}: {e}")
+                                move_failed = True
+                    
+                    if files_moved == 0:
+                        logging.warning(f"No files found to move from {output_root_path}")
+                    else:
+                        logging.info(f"Successfully moved {files_moved} file(s) from {output_root_path} to {move_target_path}")
+                else:
+                    logging.error(f"Output root directory does not exist: {output_root_path}")
+                    move_failed = True
+            except Exception as e:
+                logging.error(f"Error moving files from {output_root_path} to {move_target_path}: {e}")
+                move_failed = True
+            
+            if move_failed:
+                logging.error("File move operation failed.")
+                sys.exit(1)
+
+
         
         #FINAL EXIT
         sys.exit(return_code)

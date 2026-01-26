@@ -68,6 +68,17 @@ def main():
             print(f"Error: value '{match_value}' from {branch_file} not found in full_report", file=sys.stderr)
             sys.exit(1)
 
+
+    # Ensure output directory exists
+    output_dir = os.path.dirname(full_report_path)
+    if output_dir and not os.path.exists(output_dir):
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+            print(f"Created output directory: {output_dir}")
+        except Exception as e:
+            print(f"Error: Failed to create output directory {output_dir}: {e}", file=sys.stderr)
+            sys.exit(1)
+    
     # Write updated full report
     with open(full_report_path, 'w', encoding='utf-8') as f:
         json.dump(full_report, f, indent=2)
