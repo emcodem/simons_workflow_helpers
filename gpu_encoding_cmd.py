@@ -230,12 +230,62 @@ def check_duration(input_file: str, output_file: str, ffprobe_path: str, toleran
         logging.info("=======================\n")
         return False
 
-def credential_exists(target):
-    # We list the specific target and look for the "Target:" string in the output
-    cmd = f'cmdkey /list:{target} | findstr "Target:"'
+def mount_network_path(server_name: str, share_name: str, username: str, password: str) -> bool:
+    """
+    Mount a network path using net use (without drive letter).
+    Returns True if successful, False otherwise.
+    """
+    unc_path = f"\\\\{server_name}\\{share_name}"
+    
+    # First check if already mounted
+    cmd_check = f'net use | findstr "{share_name}"'
+    result_check = subprocess.run(cmd_check, shell=True, capture_output=True)
+    
+    if result_check.returncode == 0:
+        logging.info(f"Network path already mounted: {unc_path}")
+        return True
+    
+    # Mount the network path
+    # Escape spaces in server/share names
+    escaped_server = server_name.replace(" ", "^ ")
+    escaped_share = share_name.replace(" ", "^ ")
+    escaped_unc = f"\\\\{escaped_server}\\{escaped_share}"
+    
+    cmd = f'net use {escaped_unc} /user:{username} "{password}"'
+    logging.info(f"Executing mount command: net use {escaped_unc} /user:{username} ****")
     result = subprocess.run(cmd, shell=True, capture_output=True)
     
-    return result.returncode == 0
+    if result.returncode == 0:
+        logging.info(f"Successfully mounted: {unc_path}")
+        return True
+    else:
+        logging.error(f"Failed to mount {unc_path}: {result.stderr.decode().strip()}")
+        return False
+
+def ensure_long_path(path_str):
+    """
+    Converts a path string to a Windows Extended Length Path.
+    Handles both local paths and UNC network shares.
+    """
+    if not path_str:
+        return path_str
+    
+    # Normalize slashes to backslashes for Windows API
+    path_str = os.path.normpath(path_str.strip())
+    
+    # Already has the extended length prefix?
+    if path_str.startswith(r"\\?"):
+        return path_str
+    
+    # Is it a UNC path? (Starts with \\)
+    if path_str.startswith(r"\\"):
+        # Convert \\server\share to \\?\UNC\server\share
+        return r"\\?\UNC" + path_str[1:]
+    
+    # Is it a local path? (e.g., C:\)
+    # We use abspath to ensure it's fully qualified before prefixing
+    full_path = os.path.abspath(path_str)
+    return r"\\?\\" + full_path
 
 def main():
     parser = argparse.ArgumentParser(description="Apply transformation rules to FFmpeg command and execute it.")
@@ -283,29 +333,37 @@ def main():
             logging.error("Error: --storage_account requires --output_root and --storage_pass to be set.")
             sys.exit(1)
         
-        #parse server name/op from output_root
+        #parse server name and share name from output_root
         _server_name = ""
+        _share_name = ""
         output_root_path = Path(args.output_root)
-        if (output_root_path.drive.startswith("\\\\")):
-            #network path
-            parts = output_root_path.parts
-            if len(parts) >= 2:
-                _server_name = parts[1]
+        drive = output_root_path.drive
+        
+        # Handle both regular UNC (\\SERVER\share) and extended-length UNC (\\?\UNC\SERVER\share)
+        if drive.startswith("\\\\?\\UNC\\"):
+            # Extended-length UNC path: \\?\UNC\SERVERNAME\SHARENAME
+            parts = drive[8:].split("\\")
+            _server_name = parts[0]
+            _share_name = parts[1] if len(parts) > 1 else ""
+        elif drive.startswith("\\\\"):
+            # Regular UNC path: \\SERVERNAME\SHARENAME
+            parts = drive[2:].split("\\")
+            _server_name = parts[0]
+            _share_name = parts[1] if len(parts) > 1 else ""
         else:
             logging.error("Error: --output_root must be a network path (UNC) when using --storage_account.")
             sys.exit(1)
-        logging.info(f"Checking Credentials for server: {_server_name}")
-        if (not credential_exists(args.storage_account)):
-            #store credentials
-            logging.info(f"Storing Credentials for account: {args.storage_account}, server: {_server_name}")
-            cmd = f'cmdkey /add:{args.storage_account} /user:{args.storage_account} /pass:{args.storage_pass}'
-            logging.info(f"Executing command: {cmd}")
-            result = subprocess.run(cmd, shell=True, capture_output=True)
-            if result.returncode == 0:
-                logging.info(f"Credentials for {args.storage_account} stored successfully.")
-            else:
-                logging.error(f"Error storing credentials for {args.storage_account}: {result.stderr.decode().strip()}")
-                sys.exit(1)
+        
+        if not _share_name:
+            logging.error("Error: Could not extract share name from UNC path.")
+            sys.exit(1)
+        
+        logging.info(f"Network path: {_server_name} / {_share_name}")
+        
+        # Mount the network path if not already mounted
+        if not mount_network_path(_server_name, _share_name, args.storage_account, args.storage_pass):
+            logging.error(f"Failed to mount network path \\\\{_server_name}\\{_share_name}")
+            sys.exit(1)
     
     # Create output_root folder if specified
     if args.output_root:
@@ -429,24 +487,34 @@ def main():
                 
         # If output_root is set, move all files from output_root to move_target
         if args.output_root and args.move_target:
-            output_root_path = Path(args.output_root)
-            move_target_path = Path(args.move_target)
+            # 1. Apply the long-path prefix conversion immediately
+            output_root_raw = ensure_long_path(args.output_root)
+            move_target_raw = ensure_long_path(args.move_target)
+            
+            # 2. Convert to Path objects
+            output_root_path = Path(output_root_raw)
+            move_target_path = Path(move_target_raw)
+            
             move_failed = False
             
             try:
                 # Create move_target directory if it doesn't exist
                 move_target_path.mkdir(parents=True, exist_ok=True)
-                logging.info(f"Move target directory created (or already exists): {move_target_path}")
+                logging.info(f"Move target directory created/verified: {move_target_path}")
                 
                 # Find and move all files from output_root
                 if output_root_path.exists():
                     files_moved = 0
+                    # glob works with extended paths as long as the base path has the prefix
                     for file_path in output_root_path.glob('*.*'):
                         if file_path.is_file():
                             try:
                                 destination = move_target_path / file_path.name
+                                
+                                # .replace() is atomic on the same volume and supports long paths
                                 file_path.replace(destination)
-                                logging.info(f"Moved: {file_path.name} to {move_target_path}")
+                                
+                                logging.info(f"Moved: {file_path.name}")
                                 files_moved += 1
                             except Exception as e:
                                 logging.error(f"Error moving file {file_path.name}: {e}")
@@ -455,12 +523,13 @@ def main():
                     if files_moved == 0:
                         logging.warning(f"No files found to move from {output_root_path}")
                     else:
-                        logging.info(f"Successfully moved {files_moved} file(s) from {output_root_path} to {move_target_path}")
+                        logging.info(f"Successfully moved {files_moved} file(s) to {move_target_path}")
                 else:
                     logging.error(f"Output root directory does not exist: {output_root_path}")
                     move_failed = True
+                    
             except Exception as e:
-                logging.error(f"Error moving files from {output_root_path} to {move_target_path}: {e}")
+                logging.error(f"Critical error during move operation: {e}")
                 move_failed = True
             
             if move_failed:
