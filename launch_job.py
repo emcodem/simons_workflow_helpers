@@ -44,7 +44,7 @@ def setup_logging() -> logging.Logger:
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.DEBUG)
 
-    handler = logging.StreamHandler(sys.stdout)
+    handler = logging.StreamHandler(sys.stderr)
     handler.setLevel(logging.DEBUG)
 
     formatter = logging.Formatter(
@@ -387,6 +387,9 @@ def write_summary(
     logger.info(f'Total jobs: {total_jobs}')
     logger.info(f'Successful: {successful_jobs}')
     logger.info(f'Failed: {failed_jobs}')
+    print(f'Total jobs: {total_jobs}', file=sys.stderr)
+    print(f'Successful: {successful_jobs}', file=sys.stderr)
+    print(f'Failed: {failed_jobs}', file=sys.stderr)
 
     for job_id, job_info in results.items():
         input_file = job_info.get('input_file', 'Unknown')
