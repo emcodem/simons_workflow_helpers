@@ -222,6 +222,7 @@ def launch_jobs(
                 f'Launching job {idx + 1}/{len(input_files)}: {input_file}'
             )
 
+            logger.info("POST Job data: %s", job_data)
             response = session.post(
                 jobs_url,
                 json=job_data,
@@ -257,17 +258,18 @@ def poll_job_completion(
     session: requests.Session,
     logger: logging.Logger,
     input_file: str = 'Unknown',
-    poll_timeout: int = 1800
+    poll_timeout: int = 86400,
+    poll_frequency: int = 60
 ) -> Optional[Dict[str, Any]]:
     """
     Poll job until completion.
-    Retry every 60 seconds, up to 30 minutes.
+    Poll every poll_frequency seconds, up to poll_timeout seconds.
+    Only retry on communication errors, not on job not found.
     Returns job entry from history on success, None on failure.
     """
-    max_retries = poll_timeout // 60
-    retry_count = 0
+    start_time = time.time()
 
-    while retry_count < max_retries:
+    while (time.time() - start_time) < poll_timeout:
         try:
             jobs_url = f'{webui_url}/jobs?jobid={job_id}'
             response = session.get(jobs_url, timeout=10)
@@ -282,30 +284,27 @@ def poll_job_completion(
                     if state is not None:
                         return job_entry
 
-            retry_count += 1
+            elapsed = int(time.time() - start_time)
             logger.debug(
-                f'{input_file} not completed yet, retry {retry_count}/{max_retries}'
+                f'{input_file} not completed yet, elapsed {elapsed}s of {poll_timeout}s'
             )
-            time.sleep(60)
+            time.sleep(poll_frequency)
 
         except requests.exceptions.RequestException as e:
             logger.warning(
-                f'HTTP error polling {input_file}, retry {retry_count + 1}: {e}'
+                f'HTTP error polling {input_file}: {e}'
             )
-            retry_count += 1
-            time.sleep(60)
+            time.sleep(poll_frequency)
         except json.JSONDecodeError as e:
             logger.warning(
-                f'Invalid JSON in poll response for {input_file}, retry {retry_count + 1}: {e}'
+                f'Invalid JSON in poll response for {input_file}: {e}'
             )
-            retry_count += 1
-            time.sleep(60)
+            time.sleep(poll_frequency)
         except Exception as e:
             logger.warning(
-                f'Unexpected error polling {input_file}, retry {retry_count + 1}: {e}'
+                f'Unexpected error polling {input_file}: {e}'
             )
-            retry_count += 1
-            time.sleep(60)
+            time.sleep(poll_frequency)
 
     logger.error(f'{input_file} did not complete within timeout period')
     return None
@@ -333,7 +332,8 @@ def monitor_jobs(
             session,
             logger,
             input_file,
-            poll_timeout=1800
+            poll_timeout=86400,
+            poll_frequency=poll_frequency
         )
 
         if job_result:
@@ -455,8 +455,8 @@ def main() -> int:
     parser.add_argument(
         '--poll_frequency',
         type=int,
-        default=60,
-        help='Polling frequency in seconds (default: 60)'
+        default=None,
+        help='Polling frequency in seconds (default: auto-calculated or 60)'
     )
 
     args = parser.parse_args()
@@ -498,12 +498,19 @@ def main() -> int:
 
         logger.info(f'Successfully launched {len(launched_jobs)} jobs')
 
+        
+        if args.poll_frequency is not None:
+            poll_frequency = args.poll_frequency
+        else:
+            poll_frequency = max(1, min(int(len(launched_jobs) * 0.5), 60))
+        
+        logger.info(f'Using polling frequency of {poll_frequency} seconds')
         results = monitor_jobs(
             args.webui_url,
             launched_jobs,
             session,
             logger,
-            args.poll_frequency
+            poll_frequency
         )
 
         write_summary(results, logger)
