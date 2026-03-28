@@ -15,6 +15,8 @@ Input parameters:
 - webui_url: Base URL of FFAStrans WebUI
 - variables_from_job_id: Optional, copy variables from existing job
 - poll_frequency: Optional, default 60 seconds
+- disable_polling: Optional, skip job monitoring after launch
+- json_escape_input_file: Optional, double-escape input file before JSON submission
 
 Flow:
 1. Call webui_url/tickets and filter for variables_from_job_id
@@ -192,6 +194,11 @@ def prepare_variables(
     return prepared_vars
 
 
+def _json_escape_string(value: str) -> str:
+    """Return a JSON-escaped string value without the surrounding quotes."""
+    return json.dumps(value)
+
+
 def launch_jobs(
     wf_id: str,
     input_files: List[str],
@@ -199,6 +206,7 @@ def launch_jobs(
     priority: str,
     variables: List[Dict[str, str]],
     webui_url: str,
+    json_escape_input_file: bool,
     session: requests.Session,
     logger: logging.Logger
 ) -> List[Tuple[str, datetime, str]]:
@@ -209,9 +217,14 @@ def launch_jobs(
 
     for idx, input_file in enumerate(input_files):
         try:
+            job_input_file = (
+                _json_escape_string(input_file)
+                if json_escape_input_file
+                else input_file
+            )
             job_data = {
                 'wf_id': wf_id,
-                'inputfile': input_file,
+                'inputfile': job_input_file,
                 'start_proc': start_proc,
                 'priority': priority,
                 'variables': variables
@@ -458,6 +471,16 @@ def main() -> int:
         default=None,
         help='Polling frequency in seconds (default: auto-calculated or 60)'
     )
+    parser.add_argument(
+        '--disable_polling',
+        action='store_true',
+        help='Launch jobs without waiting for completion'
+    )
+    parser.add_argument(
+        '--json_escape_input_file',
+        action='store_true',
+        help='Double-escape input_file before JSON submission'
+    )
 
     args = parser.parse_args()
 
@@ -488,6 +511,7 @@ def main() -> int:
             args.priority,
             variables,
             args.webui_url,
+            args.json_escape_input_file,
             session,
             logger
         )
@@ -498,7 +522,10 @@ def main() -> int:
 
         logger.info(f'Successfully launched {len(launched_jobs)} jobs')
 
-        
+        if args.disable_polling:
+            logger.info('Polling disabled, exiting after launching jobs')
+            return 0
+
         if args.poll_frequency is not None:
             poll_frequency = args.poll_frequency
         else:
